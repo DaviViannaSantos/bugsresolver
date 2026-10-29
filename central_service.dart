@@ -1,0 +1,62 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import '../models/ocorrencia.dart';
+
+class CentralService {
+  final _db = FirebaseFirestore.instance;
+
+  Stream<List<Ocorrencia>> acompanhar() => _db
+      .collection('ocorrencias')
+      .orderBy('criadoEm', descending: true)
+      .snapshots()
+      .map((s) => s.docs.map(Ocorrencia.fromDoc).toList());
+
+  Future<void> registrar({
+    required String titulo,
+    required String local,
+    required String descricao,
+  }) async {
+    final u = FirebaseAuth.instance.currentUser!;
+    await _db.collection('ocorrencias').add({
+      'titulo': titulo.trim(),
+      'local': local.trim(),
+      'descricao': descricao.trim(),
+      'autorId': u.uid, // BUG FIX 10: usa u.uid em vez de u.email
+      'autorNome': u.displayName ?? u.email ?? 'Anônimo',
+      'resolvido': false,
+      'criadoEm': FieldValue.serverTimestamp(),
+    });
+  }
+
+  Future<void> alterarStatus(Ocorrencia item) async {
+    final u = FirebaseAuth.instance.currentUser!;
+    if (u.uid != item.autorId) {
+      throw StateError('Apenas o dono pode alterar o status.');
+    }
+    await _db
+        .collection('ocorrencias')
+        .doc(item.id)
+        .update({'resolvido': !item.resolvido}); // BUG FIX 12: inverte o status atual
+  }
+
+  Future<void> enviarPista(String ocorrenciaId, String mensagem) async {
+    final u = FirebaseAuth.instance.currentUser!;
+    await _db
+        .collection('ocorrencias')
+        .doc(ocorrenciaId) // BUG FIX 11: usa ocorrenciaId em vez de 'pistas' fixo
+        .collection('pistas')
+        .add({
+      'mensagem': mensagem.trim(),
+      'autorId': u.uid,
+      'autorNome': u.displayName ?? u.email ?? 'Anônimo',
+      'criadoEm': FieldValue.serverTimestamp(),
+    });
+  }
+
+  Stream<QuerySnapshot<Map<String, dynamic>>> pistas(String id) => _db
+      .collection('ocorrencias')
+      .doc(id)
+      .collection('pistas')
+      .orderBy('criadoEm', descending: false)
+      .snapshots();
+}
